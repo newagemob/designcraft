@@ -437,6 +437,27 @@ fn listing_and_tools_carry_effect_metadata() {
 }
 
 #[test]
+fn orcha_describe_manifest() {
+    let mut s = server();
+    let m = ok(&mut s, "orcha_describe", json!({}));
+    assert_eq!(m["schema"], "orcha.capabilities/v1");
+    assert_eq!(m["engine"]["id"], "design");
+    assert_eq!(m["features"]["undo"], true);
+    assert_eq!(m["features"]["live_gui"], false);
+    let cmds = m["commands"].as_array().unwrap();
+    assert_eq!(cmds.len(), designcraft_engine::command_specs().len());
+    let get = |id: &str| cmds.iter().find(|c| c["id"] == id).unwrap().clone();
+    assert_eq!(get("frame.create")["effects"], json!(["write"]));
+    assert_eq!(get("frame.create")["undoable"], true);
+    assert_eq!(get("document.inspect")["effects"], json!(["read"]));
+    assert_eq!(get("document.inspect")["undoable"], false);
+    assert_eq!(get("file.exportPdf")["effects"], json!(["write", "export"]));
+    assert_eq!(get("file.exportIdml")["effects"], json!(["read", "export"]));
+    assert_eq!(get("history.begin")["effects"], json!(["write"]));
+    assert!(cmds.iter().all(|c| c["effects"].as_array().is_some_and(|e| !e.is_empty()) && c["undoable"].is_boolean()));
+}
+
+#[test]
 fn history_group_over_mcp() {
     let mut s = server();
     let count = |s: &mut Server| {

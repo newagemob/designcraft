@@ -119,6 +119,14 @@ pub fn tool_definitions() -> Vec<Value> {
             true,
         ),
         tool(
+            "orcha_describe",
+            "Describe capabilities",
+            "This engine's capability manifest in the `orcha.capabilities/v1` shape: engine identity, features, formats and \
+             every engine command with its effects (read / write / export) and whether it records an undo step.",
+            empty(),
+            true,
+        ),
+        tool(
             "execute",
             "Execute command",
             "Run any DesignCraft command by id with JSON params (ids and params from list_commands). Examples: \
@@ -527,6 +535,64 @@ fn pointer(b: &mut dyn Backend, a: &Args) -> Result<Value, String> {
     b.call("ui.pointer", pick(a, &["events", "mods"]))
 }
 
+/// Effects of one engine command: queries only read; journaled commands write; exports (and
+/// renders) also write files outside the document.
+fn command_effects(c: &designcraft_engine::CommandSpec) -> Vec<&'static str> {
+    let mut e = vec![if c.journal { "write" } else { "read" }];
+    if c.id.starts_with("file.export") || c.id.split('.').any(|seg| seg.starts_with("render")) {
+        e.push("export");
+    }
+    e
+}
+
+/// The `orcha.capabilities/v1` manifest, built from the engine's command registry (UI-only
+/// commands of the desktop app are not included).
+pub fn orcha_manifest(live_gui: bool) -> Value {
+    let specs = designcraft_engine::command_specs();
+    let has = |id: &str| specs.iter().any(|c| c.id == id);
+    let commands: Vec<Value> = specs
+        .iter()
+        .map(|c| {
+            let mut v = json!({"id": c.id, "effects": command_effects(c), "undoable": c.undoable});
+            if !c.label.is_empty() {
+                v["label"] = json!(c.label);
+            }
+            if !c.params.is_empty() {
+                v["params_doc"] = json!(c.params);
+            }
+            v
+        })
+        .collect();
+    json!({
+        "schema": "orcha.capabilities/v1",
+        "engine": {
+            "id": "design",
+            "name": "DesignCraft",
+            "domain": "layout",
+            "version": env!("CARGO_PKG_VERSION"),
+            "native_extensions": ["designcraft", "idml"],
+        },
+        "features": {
+            "inspect_state": true,
+            "execute": true,
+            "undo": has("edit.undo"),
+            "redo": has("edit.redo"),
+            // `batch` keeps earlier steps on failure; history.begin/commit/abort groups by hand.
+            "atomic_batch": false,
+            "save": has("file.save"),
+            "render": true,
+            "export": specs.iter().any(|c| c.id.starts_with("file.export")),
+            "live_gui": live_gui,
+        },
+        "commands": commands,
+        "formats": {
+            "import": ["designcraft", "idml", "docx", "rtf", "txt", "png", "jpg", "psd", "svg", "pdf"],
+            "export": ["designcraft", "idml", "pdf", "epub", "html", "txt", "png"],
+        },
+        "question_sets": [],
+    })
+}
+
 fn dispatch(b: &mut dyn Backend, name: &str, a: &Args) -> Result<ToolResult, String> {
     let j = |v: Value| Ok(ToolResult::json(&v));
     match name {
@@ -541,6 +607,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Args) -> Result<ToolResult, Str
             j(exec(b, cmd, params)?)
         }
         "batch" => batch(b, a),
+        "orcha_describe" => j(orcha_manifest(b.has_ui())),
         "inspect_document" => j(b.call("document.inspect", json!({}))?),
         "get_story" => j(exec(b, "story.get", pick(a, &["story", "frame"]))?),
         "set_story_text" => {
