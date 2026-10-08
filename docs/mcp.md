@@ -50,6 +50,7 @@ see `ui_inspect` → `canvasRect`).
 | `list_commands` | Every command (id, label, menu path, shortcut, params, enabled, `journal` (false = read-only query), `undoable`), with `filter` / `enabledOnly` |
 | `execute` | Run any command: `{command, params}` |
 | `batch` | Run `commands: [{command, params}]` (or `script` text, one `command.id {json}` per line) in order, stopping at the first error (reports `failedIndex`); `"$N.path"` parameters use earlier results ([agents.md](agents.md)) |
+| (grouping) | `execute` `history.begin {label?}` … `history.commit` makes everything in between one undo step; `history.abort` rolls it back |
 | `inspect_document` | Pages, spreads, items (ids, bounds, fill, story), stories (overset), layers, styles, swatches, selection |
 | `get_story` | Text, frames, paragraphs, lines, overset of a story (`story` or text `frame`) |
 | `set_story_text` | Replace a story's text (`\n` = new paragraph) |

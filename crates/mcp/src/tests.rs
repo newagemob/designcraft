@@ -435,3 +435,24 @@ fn listing_and_tools_carry_effect_metadata() {
     assert_eq!(ann("new_document")["destructiveHint"], false);
     assert!(ann("pointer").get("destructiveHint").is_none());
 }
+
+#[test]
+fn history_group_over_mcp() {
+    let mut s = server();
+    let count = |s: &mut Server| {
+        ok(s, "inspect_document", json!({}))["spreads"].as_array().unwrap().iter().map(|sp| sp["items"].as_array().map_or(0, Vec::len)).sum::<usize>()
+    };
+    let before = count(&mut s);
+    ok(&mut s, "execute", json!({"command": "history.begin", "params": {"label": "Plan"}}));
+    for x in [36, 136, 236] {
+        ok(&mut s, "execute", json!({"command": "frame.create", "params": {"rect": [x, 36, x + 80, 120], "content": "unassigned"}}));
+    }
+    ok(&mut s, "execute", json!({"command": "history.commit"}));
+    assert_eq!(count(&mut s), before + 3);
+    assert_eq!(ok(&mut s, "execute", json!({"command": "edit.undo"}))["undone"], "Plan");
+    assert_eq!(count(&mut s), before);
+    ok(&mut s, "execute", json!({"command": "history.begin"}));
+    ok(&mut s, "execute", json!({"command": "frame.create", "params": {"rect": [36, 36, 80, 80], "content": "unassigned"}}));
+    ok(&mut s, "execute", json!({"command": "history.abort"}));
+    assert_eq!(count(&mut s), before);
+}

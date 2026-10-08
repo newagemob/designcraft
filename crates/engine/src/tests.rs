@@ -539,6 +539,45 @@ fn commands_take_non_object_params_without_panicking() {
 }
 
 #[test]
+fn history_group_is_one_undo_step() {
+    let mut s = session();
+    let items = |s: &Session| s.doc().unwrap().doc.spreads.iter().map(|sp| sp.items.len()).sum::<usize>();
+    let undo_len = |s: &Session| s.doc().unwrap().history.undo.len();
+    let base_items = items(&s);
+    let base_undo = undo_len(&s);
+    assert!(s.execute("history.commit", &json!({})).is_err(), "commit without a group is disabled");
+    assert_eq!(s.execute("history.begin", &json!({"label": "Three frames"})).unwrap()["label"], "Three frames");
+    assert!(s.execute("history.begin", &json!({})).is_err(), "groups don't nest");
+    for x in [36.0, 136.0, 236.0] {
+        s.execute("frame.create", &json!({"rect": [x, 36.0, x + 80.0, 120.0], "content": "unassigned"})).unwrap();
+    }
+    assert_eq!(items(&s), base_items + 3);
+    let r = s.execute("history.commit", &json!({})).unwrap();
+    assert_eq!(r, json!({"committed": "Three frames", "changed": true}));
+    assert_eq!(undo_len(&s), base_undo + 1);
+    assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Three frames");
+    // One undo removes all three, one redo brings them back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(items(&s), base_items);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(items(&s), base_items + 3);
+    // Abort rolls back every edit since begin and records nothing.
+    let undo_before = undo_len(&s);
+    s.execute("history.begin", &json!({})).unwrap();
+    s.execute("frame.create", &json!({"rect": [36, 300, 100, 400], "content": "unassigned"})).unwrap();
+    s.execute("frame.create", &json!({"rect": [136, 300, 200, 400], "content": "unassigned"})).unwrap();
+    assert_eq!(items(&s), base_items + 5);
+    assert_eq!(s.execute("history.abort", &json!({})).unwrap(), json!({"aborted": "Group"}));
+    assert_eq!(items(&s), base_items + 3);
+    assert_eq!(undo_len(&s), undo_before);
+    assert!(s.execute("history.abort", &json!({})).is_err());
+    // An empty group records no step.
+    s.execute("history.begin", &json!({})).unwrap();
+    assert_eq!(s.execute("history.commit", &json!({})).unwrap()["changed"], false);
+    assert_eq!(undo_len(&s), undo_before);
+}
+
+#[test]
 fn command_listing_carries_journal_and_undoable() {
     let s = session();
     let list = serde_json::to_value(s.commands()).unwrap();

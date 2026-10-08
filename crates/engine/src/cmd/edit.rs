@@ -14,6 +14,14 @@ fn can_undo(s: &Session) -> std::result::Result<(), String> {
 fn can_redo(s: &Session) -> std::result::Result<(), String> {
     s.active().filter(|d| !d.history.redo.is_empty()).map(|_| ()).ok_or_else(|| "nothing to redo".into())
 }
+fn no_group(s: &Session) -> std::result::Result<(), String> {
+    has_doc(s)?;
+    if s.active().is_some_and(|d| d.interaction.is_some()) { Err("an undo group or interaction is already open".into()) } else { Ok(()) }
+}
+fn in_group(s: &Session) -> std::result::Result<(), String> {
+    has_doc(s)?;
+    if s.active().is_some_and(|d| d.interaction.is_some()) { Ok(()) } else { Err("no open undo group (history.begin)".into()) }
+}
 fn has_clip(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     let text = s.text_clipboard.is_some() && s.active().is_some_and(|d| d.selection.text.is_some());
@@ -120,6 +128,25 @@ pub fn specs() -> Vec<CommandSpec> {
             st.selection = e.selection;
             st.revision += 1;
             Ok(json!({"redone": e.label}))
+        }),
+        // Grouping over the command channel: everything between begin and commit is one undo
+        // step (the tool interaction mechanism, see `Session::begin_interaction`).
+        cmd!(noundo "history.begin", "Begin Undo Group", [], None, "{label?: str} — later edits become one undo step until history.commit (history.abort rolls them back)", no_group, |s, p| {
+            let label = super::str_param(p, "label").filter(|l| !l.is_empty()).unwrap_or("Group").to_string();
+            s.begin_interaction(&label)?;
+            Ok(json!({"label": label}))
+        }),
+        cmd!(noundo "history.commit", "Commit Undo Group", [], None, "{} — close the group opened by history.begin as one undo step", in_group, |s, _| {
+            let st = s.doc()?;
+            let it = st.interaction.as_ref().ok_or_else(|| super::bad("history.commit", "no open group"))?;
+            let (label, changed) = (it.label.clone(), !Arc::ptr_eq(&it.doc, &st.doc));
+            s.commit_interaction()?;
+            Ok(json!({"committed": label, "changed": changed}))
+        }),
+        cmd!(noundo "history.abort", "Abort Undo Group", [], None, "{} — roll back every edit since history.begin", in_group, |s, _| {
+            let label = s.doc()?.interaction.as_ref().map(|i| i.label.clone()).ok_or_else(|| super::bad("history.abort", "no open group"))?;
+            s.cancel_interaction();
+            Ok(json!({"aborted": label}))
         }),
         cmd!(noundo "selection.set", "Select", [], None, "{ids: [id], add?: bool, content?: bool}", has_doc, |s, p| {
             let ids = ids_param(p, "ids").unwrap_or_default();
