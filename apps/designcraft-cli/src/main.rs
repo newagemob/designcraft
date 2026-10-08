@@ -9,6 +9,8 @@
 //! designcraft-cli app [--port PORT] COMMAND [JSON]   # run a command in the running app (designcraft --control PORT)
 //! designcraft-cli app [--port PORT] --method METHOD [JSON]   # any control-channel method (ui.screenshot, ui.render, …)
 //! designcraft-cli mcp [--connect PORT] [--sample]  # MCP server over stdio (docs/mcp.md)
+//!     --connect, script --connect and app also take --control-token HEX | --control-token-file PATH,
+//!     or --control-port-file PATH (address + token from `designcraft --control 0 --control-port-file PATH`)
 //! designcraft-cli perf [--pages N] [--frames N] [--chars N] [--images N] [--runs N] [--strict]  # budgets on a synthetic stress document
 //! designcraft-cli bench FILE [--runs N]  # the same measurements on one document
 //! designcraft-cli links                   # Discord, website, app page and GitHub links
@@ -106,22 +108,24 @@ fn mcp(args: &[String]) -> Result<(), String> {
     use designcraft_mcp::{Backend, Headless, Remote, Server, control_addr};
     let mut connect: Option<String> = None;
     let mut sample = false;
-    let mut it = args.iter();
+    let mut control = designcraft_mcp::control_client::ControlClientArgs::default();
+    let mut it = args.iter().cloned();
     while let Some(a) = it.next() {
+        if control.take(&a, &mut it)? {
+            continue;
+        }
         match a.as_str() {
-            "--connect" => connect = Some(it.next().cloned().ok_or("--connect needs a port or host:port")?),
+            "--connect" => connect = Some(it.next().ok_or("--connect needs a port or host:port")?),
             "--sample" => sample = true,
             other => return Err(format!("unknown mcp option `{other}` (usage: designcraft-cli mcp [--connect PORT] [--sample])")),
         }
     }
-    let backend: Box<dyn Backend> = match connect {
-        Some(c) => {
-            let addr = control_addr(&c);
-            Box::new(
-                Remote::connect(&addr)
-                    .map_err(|e| format!("cannot connect to the DesignCraft app at {addr}: {e} (start it with `designcraft --control PORT`)"))?,
-            )
-        }
+    let (file_addr, token) = control.resolve()?;
+    let backend: Box<dyn Backend> = match connect.map(|c| control_addr(&c)).or(file_addr) {
+        Some(addr) => Box::new(
+            Remote::connect_with_token(&addr, token)
+                .map_err(|e| format!("cannot connect to the DesignCraft app at {addr}: {e} (start it with `designcraft --control PORT`)"))?,
+        ),
         None => {
             let mut h = Headless::with_document();
             if sample {
@@ -266,6 +270,7 @@ fn script(args: &[String]) -> Result<(), String> {
     let mut save: Option<String> = None;
     let mut export: Vec<String> = Vec::new();
     let mut keep_going = false;
+    let (args, control) = control_flags(args)?;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().ok_or_else(|| format!("{a} needs a value"));
@@ -293,14 +298,12 @@ fn script(args: &[String]) -> Result<(), String> {
         Some(f) => std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?,
     };
     let steps = designcraft_engine::script::parse(&text)?;
-    let mut backend: Box<dyn Backend> = match &connect {
-        Some(c) => {
-            let addr = control_addr(c);
-            Box::new(
-                Remote::connect(&addr)
-                    .map_err(|e| format!("cannot connect to the DesignCraft app at {addr}: {e} (start it with `designcraft --control PORT`)"))?,
-            )
-        }
+    let (file_addr, token) = control.resolve()?;
+    let mut backend: Box<dyn Backend> = match connect.as_deref().map(control_addr).or(file_addr) {
+        Some(addr) => Box::new(
+            Remote::connect_with_token(&addr, token)
+                .map_err(|e| format!("cannot connect to the DesignCraft app at {addr}: {e} (start it with `designcraft --control PORT`)"))?,
+        ),
         None => Box::new(Headless::with_document()),
     };
     let b = &mut *backend;
@@ -345,22 +348,42 @@ fn script(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// Split off the control-channel client flags (`--control-token`, `--control-token-file`,
+/// `--control-port-file`).
+fn control_flags(args: &[String]) -> Result<(Vec<String>, designcraft_mcp::control_client::ControlClientArgs), String> {
+    let mut control = designcraft_mcp::control_client::ControlClientArgs::default();
+    let mut rest = Vec::new();
+    let mut it = args.iter().cloned();
+    while let Some(a) = it.next() {
+        if !control.take(&a, &mut it)? {
+            rest.push(a);
+        }
+    }
+    Ok((rest, control))
+}
+
 /// `app`: one command or control-channel method in the running app.
 fn app(args: &[String]) -> Result<(), String> {
     use designcraft_mcp::{Backend, Remote, control_addr};
     let mut port = "7979".to_string();
+    let mut port_given = false;
     let mut method: Option<String> = None;
     let mut rest: Vec<String> = Vec::new();
+    let (args, control) = control_flags(args)?;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--port" | "--connect" => port = it.next().cloned().ok_or("--port needs a value")?,
+            "--port" | "--connect" => {
+                port = it.next().cloned().ok_or("--port needs a value")?;
+                port_given = true;
+            }
             "--method" => method = Some(it.next().cloned().ok_or("--method needs a value")?),
             _ => rest.push(a.clone()),
         }
     }
-    let addr = control_addr(&port);
-    let mut r = Remote::connect(&addr)
+    let (file_addr, token) = control.resolve()?;
+    let addr = if port_given || file_addr.is_none() { control_addr(&port) } else { file_addr.unwrap_or_default() };
+    let mut r = Remote::connect_with_token(&addr, token)
         .map_err(|e| format!("cannot connect to the DesignCraft app at {addr}: {e} (start it with `designcraft --control {port}`)"))?;
     let json_arg =
         |s: Option<&String>| -> Result<Value, String> { s.map_or(Ok(json!({})), |t| serde_json::from_str(t).map_err(|e| format!("bad JSON: {e}"))) };

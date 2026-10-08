@@ -44,3 +44,35 @@ merged document; the template stays as it was ([agents.md](agents.md#data-merge)
 Headless window screenshots (locked screen, hidden window): `cargo run -p designcraft-ui-egui --example ui_shot -- script.jsonl`, where each line is one of the requests above, `{"shot": "/abs/out.png"}` or `{"steps": n}` (renders the whole UI offscreen with wgpu).
 
 The MCP server (`designcraft-cli mcp`) wraps the same methods for Claude and other agents.
+
+## Authentication and discovery
+
+The channel needs a per-launch token, with the same handshake as PhotoCraft's control port. The first
+request on every connection must be
+
+```text
+→ {"id": 0, "method": "auth", "params": {"token": "<64 hex characters>"}}
+← {"id": 0, "ok": true, "result": {"authenticated": true}}
+```
+
+Any other first request is answered `{"id": …, "ok": false, "error": "authentication required"}` and the
+connection is closed, so nothing runs on it.
+
+| Flag (environment variable) | Meaning |
+|---|---|
+| `--control <port>` (`DESIGNCRAFT_CONTROL_PORT`) | Listen on `127.0.0.1:<port>`; `0` picks a free port |
+| `--control-token <hex>` (`DESIGNCRAFT_CONTROL_TOKEN`) | Use this token (64 hex characters) instead of a fresh one |
+| `--control-token-file <path>` (`DESIGNCRAFT_CONTROL_TOKEN_FILE`) | Reuse the token in this file, or create it (owner-only) with a fresh one |
+| `--control-port-file <path>` (`DESIGNCRAFT_CONTROL_PORT_FILE`) | Once listening, write `{"port": <u16>, "token": "<hex>", "pid": <u32>}` here (owner-only) |
+| `$ORCHA_CONTROL_DIR` | Without `--control-port-file`, the port file is `$ORCHA_CONTROL_DIR/designcraft.json` |
+| `--control-no-auth` (`DESIGNCRAFT_CONTROL_NO_AUTH=1`) | The old unauthenticated channel (explicit opt-in) |
+
+Without a token flag or a port file, the generated token is printed to standard error
+(`designcraft: control token: …`). Clients (`designcraft-cli`) take `--control-token`, `--control-token-file` (a
+bare token or a port file) or `--control-port-file` (address and token), or the same environment
+variables, and send `auth` on every new connection:
+
+```sh
+designcraft --control 0 --control-port-file /tmp/designcraft.json &
+designcraft-cli mcp --control-port-file /tmp/designcraft.json
+```

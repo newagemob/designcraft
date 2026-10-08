@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+pub mod control_client;
 mod headless;
 mod server;
 mod tools;
