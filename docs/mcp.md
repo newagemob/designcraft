@@ -47,7 +47,7 @@ see `ui_inspect` → `canvasRect`).
 
 | Tool | What it does |
 |---|---|
-| `list_commands` | Every command (id, label, menu path, shortcut, params, enabled), with `filter` / `enabledOnly` |
+| `list_commands` | Every command (id, label, menu path, shortcut, params, enabled, `journal` (false = read-only query), `undoable`), with `filter` / `enabledOnly` |
 | `execute` | Run any command: `{command, params}` |
 | `batch` | Run `commands: [{command, params}]` (or `script` text, one `command.id {json}` per line) in order, stopping at the first error (reports `failedIndex`); `"$N.path"` parameters use earlier results ([agents.md](agents.md)) |
 | `inspect_document` | Pages, spreads, items (ids, bounds, fill, story), stories (overset), layers, styles, swatches, selection |

@@ -537,3 +537,16 @@ fn commands_take_non_object_params_without_panicking() {
         assert!(r.is_ok(), "{p}: {r:?}");
     }
 }
+
+#[test]
+fn command_listing_carries_journal_and_undoable() {
+    let s = session();
+    let list = serde_json::to_value(s.commands()).unwrap();
+    let get = |id: &str| list.as_array().unwrap().iter().find(|c| c["id"] == id).unwrap().clone();
+    let c = get("frame.create");
+    assert_eq!((c["journal"].as_bool(), c["undoable"].as_bool()), (Some(true), Some(true)));
+    let c = get("edit.undo");
+    assert_eq!((c["journal"].as_bool(), c["undoable"].as_bool()), (Some(true), Some(false)));
+    let c = get("document.inspect");
+    assert_eq!((c["journal"].as_bool(), c["undoable"].as_bool()), (Some(false), Some(false)));
+}

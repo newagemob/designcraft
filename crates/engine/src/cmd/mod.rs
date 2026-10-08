@@ -90,6 +90,10 @@ pub struct CommandInfo {
     pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_reason: Option<String>,
+    /// Recorded in the session journal; `false` marks a read-only query.
+    pub journal: bool,
+    /// Records an undo step when it changes the document.
+    pub undoable: bool,
 }
 
 impl CommandSpec {
@@ -103,6 +107,8 @@ impl CommandSpec {
             params: self.params,
             enabled: e.is_ok(),
             disabled_reason: e.err(),
+            journal: self.journal,
+            undoable: self.undoable,
         }
     }
 }

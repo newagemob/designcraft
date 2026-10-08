@@ -68,13 +68,31 @@ fn obj(props: Value, required: &[&str]) -> Value {
     o
 }
 fn tool(name: &str, title: &str, desc: &str, schema: Value, read_only: bool) -> Value {
-    json!({
+    let mut t = json!({
         "name": name,
         "title": title,
         "description": desc,
         "inputSchema": schema,
         "annotations": {"title": title, "readOnlyHint": read_only, "openWorldHint": false},
-    })
+    });
+    if let Some(d) = destructive_hint(name, read_only) {
+        t["annotations"]["destructiveHint"] = json!(d);
+    }
+    t
+}
+
+/// MCP `destructiveHint` where it is known: read-only tools never are; tools that can delete or
+/// overwrite (any command, story text, files on disk, frame contents) are; tools that only add
+/// are not. Raw UI input (`pointer`, `key`, `click`, dialogs…) depends on what it drives: omitted.
+fn destructive_hint(name: &str, read_only: bool) -> Option<bool> {
+    if read_only {
+        return Some(false);
+    }
+    match name {
+        "execute" | "batch" | "set_story_text" | "save_document" | "export_png" | "place_image" => Some(true),
+        "new_document" | "open_document" | "select_tool" => Some(false),
+        _ => None,
+    }
 }
 
 const APP_ONLY: &str = " Desktop app only (`designcraft-cli mcp --connect PORT`).";

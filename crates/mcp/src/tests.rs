@@ -416,3 +416,22 @@ fn batch_steps_use_earlier_results() {
     );
     assert_eq!(v["completed"], 2);
 }
+
+// ---------- orcha metadata ----------
+
+#[test]
+fn listing_and_tools_carry_effect_metadata() {
+    let mut s = server();
+    let l = ok(&mut s, "list_commands", json!({"filter": "frame.create"}));
+    let c = l["commands"].as_array().unwrap().iter().find(|c| c["id"] == "frame.create").unwrap();
+    assert_eq!((c["journal"].as_bool(), c["undoable"].as_bool()), (Some(true), Some(true)));
+    let l = ok(&mut s, "list_commands", json!({"filter": "document.inspect"}));
+    let c = l["commands"].as_array().unwrap().iter().find(|c| c["id"] == "document.inspect").unwrap();
+    assert_eq!(c["journal"], false);
+    let tools = tool_definitions();
+    let ann = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap()["annotations"].clone();
+    assert_eq!(ann("inspect_document")["destructiveHint"], false);
+    assert_eq!(ann("execute")["destructiveHint"], true);
+    assert_eq!(ann("new_document")["destructiveHint"], false);
+    assert!(ann("pointer").get("destructiveHint").is_none());
+}
